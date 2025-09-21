@@ -1,6 +1,7 @@
 import regex as re
 from typing import Tuple, Dict, List
 from sortedcontainers import SortedSet
+from cs336_basics.profiler import profile
 
 
 PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
@@ -247,7 +248,20 @@ class Tokenizer:
         #     self._naive_train_step(pre_tokenized_dict=pre_tokenized_dict)
         
         self._optimized_train_steps(pre_tokenized_dict, stepnum)
-                
+       
+@profile
+def main():
+    from tests.adapters import run_train_bpe
+    vocab, merges = run_train_bpe(input_path="data/TinyStoriesV2-GPT4-train.txt",
+                                  vocab_size=10000,
+                                  special_tokens=["<|endoftext|>"]
+                                  )
+    with open("trained_vocab.txt","w") as f:
+        f.write(str(vocab))
+        f.close()
+    with open("trained_merges.txt","w") as f:
+        f.write(str(merges))
+        f.close()         
 
     
 if __name__ == "__main__":
@@ -258,4 +272,6 @@ if __name__ == "__main__":
     # tokenizer.train(datafile="tests/fixtures/corpus.en",
     #                 special_tokens=["<|endoftext|>"],
     #                 vocab_end_size=260)
+    
+    main()
     pass
