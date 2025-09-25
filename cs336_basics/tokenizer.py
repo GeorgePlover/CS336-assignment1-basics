@@ -5,6 +5,7 @@ from cs336_basics.profiler import profile
 from cs336_basics.pretokenization_example import find_chunk_boundaries
 
 from multiprocessing import Pool
+import sys
 
 
 PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
@@ -35,19 +36,24 @@ class Tokenizer:
             string = f.read()
         return string
     
-    def _split_by_special(self, string:str, special_tokens: List[str]) -> str:
-        return re.split("|".join([re.escape(token) for token in special_tokens]), string)
+    def _stream_split_by_special(self, string:str, special_tokens: List[str]) -> str:
+        pattern = re.compile("|".join([re.escape(token) for token in special_tokens]))
+        last_end = 0
+        for match in pattern.finditer(string):
+            start = match.start()
+            yield string[last_end:start]  # 分割出的片段
+            last_end = match.end()
+        yield string[last_end:]  # 最后一段
+        
     
     def _str_to_bytes_tuple(self, string: str) -> tuple:
         return tuple(string.encode("utf-8"))
            
-    def _pre_tokenize_dict(self, string: str | List[str], special_tokens: List[str] = ["<|endoftext|>"]) -> dict:
-        string = self._split_by_special(string, special_tokens)
+    def _pre_tokenize_dict(self, string: str, special_tokens: List[str] = ["<|endoftext|>"]) -> dict:
+
         pre_tokenized_dict = {}
-        if isinstance(string, str):
-            string = [string]
-        strings = string
-        for string in strings:
+        
+        for string in self._stream_split_by_special(string, special_tokens):
             for match in re.finditer(pattern=PAT, string=string):
                 match_bytes = self._str_to_bytes_tuple(match.group())
                 if match_bytes not in pre_tokenized_dict:
@@ -76,6 +82,8 @@ class Tokenizer:
                 for start, end in zip(boundaries[:-1], boundaries[1:]):
                     f.seek(start)
                     chunk = f.read(end - start).decode("utf-8", errors="ignore")
+                    print("chunk size:", sys.getsizeof(chunk) / (2**30), "GiB")
+                    
                     args.append((chunk, special_tokens))
                     
                 results = pool.starmap(self._pre_tokenize_dict, args)
@@ -309,7 +317,7 @@ class Tokenizer:
         print("test_multi_process_pre_tokenize passed")
          
     def train(self, datafile: str, special_tokens: List[str], vocab_end_size: int,
-              multi_processes:bool = True, num_processes:int = 16):
+              multi_processes:bool = True, num_processes:int = 8):
         pre_tokenized_dict = self._pre_tokenize(datafile, special_tokens, multi_processes, num_processes)
         stepnum = vocab_end_size - len(self.token_id_to_bytes)
         # for i in range(stepnum):
@@ -320,8 +328,8 @@ class Tokenizer:
 @profile
 def main():
     from tests.adapters import run_train_bpe
-    vocab, merges = run_train_bpe(input_path="data/TinyStoriesV2-GPT4-train.txt",
-                                  vocab_size=10000,
+    vocab, merges = run_train_bpe(input_path="data/owt_train.txt",
+                                  vocab_size=32000,
                                   special_tokens=["<|endoftext|>"]
                                   )
     with open("trained_vocab.txt","w") as f:
