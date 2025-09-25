@@ -18,6 +18,9 @@ def profile(func):
         ps.sort_stats('cumtime')  # 按累计时间排序
         ps.print_stats(10)  # 只显示前10行
         
+        ps.sort_stats('tottime')  # 按自身时间排序
+        ps.print_stats(10)  # 只显示前10行
+        
         return result
     return wrapper
 

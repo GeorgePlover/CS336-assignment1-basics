@@ -2,9 +2,24 @@ import regex as re
 from typing import Tuple, Dict, List
 from sortedcontainers import SortedSet
 from cs336_basics.profiler import profile
+from cs336_basics.pretokenization_example import find_chunk_boundaries
+
+from multiprocessing import Pool
 
 
 PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
+
+def merge_dict_sum(dict1: Dict, dict2: Dict) -> Dict:
+    # 启发式合并
+    if len(dict2) > len(dict1):
+        dict1, dict2 = dict2, dict1
+    for key in list(dict2.keys()):
+        val = dict2.pop(key)
+        if key not in dict1:
+            dict1[key] = val
+        else:
+            dict1[key] += val
+    return dict1        
 
 class Tokenizer:
     '''
@@ -25,8 +40,9 @@ class Tokenizer:
     
     def _str_to_bytes_tuple(self, string: str) -> tuple:
         return tuple(string.encode("utf-8"))
-    
-    def _pre_tokenize_dict(self, string: str | List[str]) -> dict:
+           
+    def _pre_tokenize_dict(self, string: str | List[str], special_tokens: List[str] = ["<|endoftext|>"]) -> dict:
+        string = self._split_by_special(string, special_tokens)
         pre_tokenized_dict = {}
         if isinstance(string, str):
             string = [string]
@@ -39,8 +55,39 @@ class Tokenizer:
                 else:
                     pre_tokenized_dict[match_bytes] += 1
 
+        print(f"A pre_tokenized_dict with length {len(pre_tokenized_dict)} have been done.")
         return pre_tokenized_dict
     
+    def _pre_tokenize_multi_processes(self, filename: str, num_processes: int,
+                                           split_special_token: str = "<|endoftext|>", # 用来切分多进程分割
+                                           special_tokens: List[str] = ["<|endoftext|>"] # 用来处理所有特殊token
+                                    ):
+        res_dict = {}
+        with open(filename, "rb") as f:
+            print (f"Start to find {num_processes} boundaries...")
+            boundaries = find_chunk_boundaries(f, num_processes, bytes(split_special_token.encode("utf-8")))
+            print (f"{len(boundaries)} boundaries found.\nStart multi processes.")
+
+                # The following is a serial implementation, but you can parallelize this
+                # by sending each start/end pair to a set of processes.
+            
+            with Pool(processes=len(boundaries)) as pool:  
+                args = []
+                for start, end in zip(boundaries[:-1], boundaries[1:]):
+                    f.seek(start)
+                    chunk = f.read(end - start).decode("utf-8", errors="ignore")
+                    args.append((chunk, special_tokens))
+                    
+                results = pool.starmap(self._pre_tokenize_dict, args)
+                merge_cnt = 0
+                
+                for _dict in results:
+                    res_dict = merge_dict_sum(res_dict, _dict)
+                    merge_cnt += 1
+                    print(f"Merged {merge_cnt} process(es).")
+        
+        return res_dict
+                    
     def _token_pair_to_cmp(self, pair):
         return (self.token_id_to_bytes[pair[0]], self.token_id_to_bytes[pair[1]])
     
@@ -228,21 +275,42 @@ class Tokenizer:
             
             
     
-    def _pre_tokenize(self, datafile: str, special_tokens: List[str]) -> Dict[Tuple, int]:
+    def _pre_tokenize(self, datafile: str, special_tokens: List[str],
+                      multi_processes:bool = False, num_processes:int = 1) -> Dict[Tuple, int]:
         '''
             return a pre_tokenized_dict like: {(104, 101, 108, 108, 111) : 3} => means 'hello' appear 3 times 
         '''
         for token in special_tokens:
             self.token_id_to_bytes.append(token.encode("utf-8"))
-        
-        string = self._read_string(filepath=datafile)
-        string = self._split_by_special(string, special_tokens)
-        pre_tokenized_dict = self._pre_tokenize_dict(string=string)
+
+        if multi_processes:
+            pre_tokenized_dict = self._pre_tokenize_multi_processes(datafile, num_processes,
+                                               "<|endoftext|>",
+                                               special_tokens)
+        else:
+            string = self._read_string(filepath=datafile)
+            pre_tokenized_dict = self._pre_tokenize_dict(string=string, special_tokens=special_tokens)
         
         return pre_tokenized_dict
+    
+    def test_multi_process_pre_tokenize(self):
+        special_tokens = ["<|endoftext|>"]
+        file_path = "data/TinyStoriesV2-GPT4-valid.txt"
+        
+        import time
+        start = time.time()
+        res_single_process = self._pre_tokenize(file_path, special_tokens)
+        print("single process time cost:", time.time() - start)
+        start = time.time()
+        res_multi_processes = self._pre_tokenize_multi_processes(file_path, 8, "<|endoftext|>", special_tokens)
+        print("multi processes time cost:", time.time() - start)
+        
+        assert set(res_single_process) == set(res_multi_processes)
+        print("test_multi_process_pre_tokenize passed")
          
-    def train(self, datafile: str, special_tokens: List[str], vocab_end_size: int):
-        pre_tokenized_dict = self._pre_tokenize(datafile, special_tokens)
+    def train(self, datafile: str, special_tokens: List[str], vocab_end_size: int,
+              multi_processes:bool = True, num_processes:int = 16):
+        pre_tokenized_dict = self._pre_tokenize(datafile, special_tokens, multi_processes, num_processes)
         stepnum = vocab_end_size - len(self.token_id_to_bytes)
         # for i in range(stepnum):
         #     self._naive_train_step(pre_tokenized_dict=pre_tokenized_dict)
@@ -269,9 +337,7 @@ if __name__ == "__main__":
     # test_train_bpe_speed()
     
     # tokenizer = Tokenizer()
-    # tokenizer.train(datafile="tests/fixtures/corpus.en",
-    #                 special_tokens=["<|endoftext|>"],
-    #                 vocab_end_size=260)
+    # tokenizer.test_multi_process_pre_tokenize()
     
     main()
     pass
