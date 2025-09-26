@@ -1,3 +1,42 @@
+# Train on owt_train
+
+```bash
+20290201618 function calls (20290182003 primitive calls) in 9755.046 seconds
+
+   Ordered by: cumulative time
+   List reduced from 4394 to 10 due to restriction <10>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+        1    0.379    0.379 9741.307 9741.307 /nas/user/nsh/projects/CS336-assignment1-basics/tests/adapters.py:566(run_train_bpe)
+        1    6.277    6.277 9740.927 9740.927 /nas/user/nsh/projects/CS336-assignment1-basics/cs336_basics/tokenizer.py:319(train)
+        1 4500.856 4500.856 8788.389 8788.389 /nas/user/nsh/projects/CS336-assignment1-basics/cs336_basics/tokenizer.py:180(_optimized_train_steps)
+     2304    0.519    0.000 1844.616    0.801 /home/nsh/miniconda3/lib/python3.12/multiprocessing/pool.py:333(_maintain_pool)
+12504237253/12504236934 1620.444    0.000 1620.444    0.000 {built-in method builtins.len}
+     4611    0.035    0.000 1585.209    0.344 /home/nsh/miniconda3/lib/python3.12/multiprocessing/connection.py:1121(wait)
+     4611    0.031    0.000 1572.595    0.341 /home/nsh/miniconda3/lib/python3.12/selectors.py:402(select)
+6073853287 1059.705    0.000 1059.705    0.000 {method 'append' of 'list' objects}
+       17    0.494    0.029 1002.464   58.968 /home/nsh/miniconda3/lib/python3.12/multiprocessing/connection.py:202(send)
+     2304    0.012    0.000  969.879    0.421 /home/nsh/miniconda3/lib/python3.12/multiprocessing/pool.py:289(_join_exited_workers)
+
+
+         20290201618 function calls (20290182003 primitive calls) in 9755.046 seconds
+
+   Ordered by: internal time
+   List reduced from 4394 to 10 due to restriction <10>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+        1 4500.856 4500.856 8788.389 8788.389 /nas/user/nsh/projects/CS336-assignment1-basics/cs336_basics/tokenizer.py:180(_optimized_train_steps)
+12504237253/12504236934 1620.444    0.000 1620.444    0.000 {built-in method builtins.len}
+6073853287 1059.705    0.000 1059.705    0.000 {method 'append' of 'list' objects}
+     4611  743.650    0.161  803.983    0.174 {method 'poll' of 'select.poll' objects}
+ 78664796  290.705    0.000  312.711    0.000 /nas/user/nsh/projects/CS336-assignment1-basics/cs336_basics/tokenizer.py:164(_count_a_word)
+227747508  202.025    0.000  202.025    0.000 {built-in method _bisect.bisect_left}
+113873754  184.296    0.000  707.386    0.000 /nas/user/nsh/projects/CS336-assignment1-basics/.venv/lib/python3.12/site-packages/sortedcontainers/sortedset.py:456(remove)
+117505633  178.851    0.000  178.851    0.000 {built-in method _bisect.insort_right}
+117505926  143.387    0.000  469.804    0.000 /nas/user/nsh/projects/CS336-assignment1-basics/.venv/lib/python3.12/site-packages/sortedcontainers/sortedlist.py:253(add)
+113873754  141.623    0.000  476.072    0.000 /nas/user/nsh/projects/CS336-assignment1-basics/.venv/lib/python3.12/site-packages/sortedcontainers/sortedlist.py:426(remove)
+```
+
 # Train on TinyStories-train
 
 * 没写并行优化

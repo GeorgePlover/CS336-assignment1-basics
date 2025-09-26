@@ -1,11 +1,16 @@
 import regex as re
-from typing import Tuple, Dict, List
+from typing import Tuple, Dict, List, Any
 from sortedcontainers import SortedSet
+from functools import lru_cache
+
 from cs336_basics.profiler import profile
 from cs336_basics.pretokenization_example import find_chunk_boundaries
 
 from multiprocessing import Pool
+import numpy as np
+import numpy.typing as npt
 import sys
+import io
 
 
 PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
@@ -30,13 +35,29 @@ class Tokenizer:
         self.trained = False
         self.token_id_to_bytes = [bytes((i,)) for i in range(256)]
         self.merges = []
+        self.special_tokens = []
+        self.vocab = {}
+        self.indexed_merges = None # (int,int) -> int (index in merges)
+        self.merged_token_id = None # (int,int) -> int (merged new vocab token id)
+        self.inv_vocab = None # bytes -> int
+        
+    def init_from_given_member(self, 
+            vocab: dict[int, bytes],
+            merges: list[tuple[bytes, bytes]],
+            special_tokens: list[str] | None = None
+        ):
+        self.trained = True
+        self.vocab = vocab
+        self.special_tokens = special_tokens
+        self.merges = merges
+        
     
     def _read_string(self, filepath: str) -> str:
         with open(filepath, "r", encoding="utf-8") as f:
             string = f.read()
         return string
     
-    def _stream_split_by_special(self, string:str, special_tokens: List[str]) -> str:
+    def _stream_split_by_special(self, string:str, special_tokens: List[str]):
         pattern = re.compile("|".join([re.escape(token) for token in special_tokens]))
         last_end = 0
         for match in pattern.finditer(string):
@@ -44,9 +65,66 @@ class Tokenizer:
             yield string[last_end:start]  # 分割出的片段
             last_end = match.end()
         yield string[last_end:]  # 最后一段
+    
+    def _buffer_read(self, stream: str | io.FileIO, read_size:int = 8192)-> Any:
+        if isinstance(stream, str):
+            return stream[:read_size], stream[read_size:]
+        else:
+            string = stream.read(read_size)
+            return string, stream
         
+    def _stream_split_with_special(self, stream:str, special_tokens: List[str] | None, buffer_size:int = 1024):
+        '''
+            change stream into word/special_token
+        '''
+        if special_tokens != None:
+            special_tokens.sort(key=len, reverse=True)
+        else:
+            special_tokens = []
+        
+        pattern_special = re.compile("|".join([re.escape(token) for token in special_tokens]))
+        pattern_word = re.compile(PAT)
+        
+        buffer = ""
+        
+        while True:
+            string, stream = self._buffer_read(stream)
+            buffer += string
+            if string == "":
+                buffer_size = 0 # 直接处理完最后一轮，不留buffer
+            
+            last = 0
+            if len(special_tokens) != 0:
+                for match in pattern_special.finditer(buffer):
+                    for word in pattern_word.findall(buffer[last: match.start()]):
+                        yield word
+                        
+                    if len(buffer) - match.start() < buffer_size: # 防止special_token来自于被截断的更长的special_token
+                        last = match.start()
+                        break
+                    
+                    yield match.group()
+                    last = match.end()
+                
+            buffer = buffer[last:]
+            
+            last = 0
+            for match in pattern_word.finditer(buffer):
+                
+                if len(buffer) - match.end() < buffer_size: # 防止token被截断
+                    last = match.start()
+                    break
+                
+                yield match.group()
+                
+            buffer = buffer[last:]
+            
+            if buffer_size == 0:
+                break
     
     def _str_to_bytes_tuple(self, string: str) -> tuple:
+        if self.inv_vocab is not None: # 使用给定的编码方案
+            return  tuple([ self.inv_vocab[bytes([b])] for b in string.encode("utf-8")])
         return tuple(string.encode("utf-8"))
            
     def _pre_tokenize_dict(self, string: str, special_tokens: List[str] = ["<|endoftext|>"]) -> dict:
@@ -324,6 +402,76 @@ class Tokenizer:
         #     self._naive_train_step(pre_tokenized_dict=pre_tokenized_dict)
         
         self._optimized_train_steps(pre_tokenized_dict, stepnum)
+        self.trained = True
+        self.vocab = dict(enumerate(self.token_id_to_bytes))
+        self.special_tokens = special_tokens
+
+    @lru_cache(maxsize=1024)
+    def _merge_single_word(self, token_tuple: Tuple[int]):
+        
+        assert(len(token_tuple)>0)
+        
+        if len(token_tuple) == 1:
+            return token_tuple
+        
+        while True:
+            pair_list = []
+            for a,b in zip(token_tuple, token_tuple[1:]):
+                if (a,b) in self.indexed_merges:
+                    pair_list.append((self.indexed_merges[(a,b)], (a,b)))
+            if len(pair_list) == 0:
+                break
+            
+            aim_merge_id, aim_merge = min(pair_list)
+            
+            new_tuple = []
+            i = 0
+            while i < len(token_tuple):
+                if (i+1 < len(token_tuple)) and ((token_tuple[i], token_tuple[i+1]) == aim_merge):
+                    new_tuple.append(self.merged_token_id[(token_tuple[i], token_tuple[i+1])])
+                    i += 2
+                else:
+                    new_tuple.append(token_tuple[i])
+                    i += 1
+            token_tuple = new_tuple
+        
+        return token_tuple
+    
+    def _init_indexed_merges(self):
+        inv_vocab = dict([(value, key) for key, value in list(self.vocab.items())])
+        self.indexed_merges = dict([
+            ((inv_vocab[value[0]], inv_vocab[value[1]]), key) 
+            for key, value in enumerate(self.merges)
+        ])
+        self.merged_token_id = dict([
+            ((inv_vocab[a], inv_vocab[b]), inv_vocab[a+b]) 
+            for a,b in self.merges
+        ])
+        self.inv_vocab = inv_vocab
+        
+    def encode_iterable(self, string: str):
+        if (self.indexed_merges is None) or (self.merged_token_id is None):
+            self._init_indexed_merges()
+        
+        if self.special_tokens is None:
+            self.special_tokens = []
+        
+        for word in self._stream_split_with_special(string, self.special_tokens):
+            if word not in self.special_tokens: # aim
+                bytes_word = self._str_to_bytes_tuple(word)
+                merged_word = self._merge_single_word(bytes_word)
+                for ret in merged_word:
+                    yield ret
+            else: # a special token
+                ret = self.inv_vocab[word.encode("utf-8")]
+                yield ret
+        
+    def encode(self, string: str)-> list:
+        return [res for res in self.encode_iterable(string)]
+    
+    def decode(self, ids: list)-> str:
+        return b''.join([self.vocab[token] for token in ids]).decode(encoding="utf-8",errors="ignore")
+        
        
 @profile
 def main():
@@ -347,5 +495,10 @@ if __name__ == "__main__":
     # tokenizer = Tokenizer()
     # tokenizer.test_multi_process_pre_tokenize()
     
-    main()
+    from tests.test_tokenizer import test_encode_memory_usage,test_encode_iterable_tinystories_sample_roundtrip,test_roundtrip_single_character
+    test_encode_memory_usage()
+    # test_roundtrip_single_character()
+    # test_encode_iterable_tinystories_sample_roundtrip()
+    
+    # main()
     pass
