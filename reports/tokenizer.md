@@ -102,7 +102,7 @@
       844    1.195    0.001    1.195    0.001 {method 'read' of '_io.BufferedReader' objects}
 ```
 
-# Tests
+# Train Tests
 
 ## test_train_bpe(Passed)
 
@@ -118,4 +118,72 @@ tests/test_train_bpe.py::test_train_bpe_special_tokens PASSED
 ===============================================
  3 passed in 3.21s
 ================================================
+```
+
+# Encode
+
+## 流式处理输入
+
+核心代码如下。
+
+* _buffer_read：首先是读取，一次处理一个read_size里面的字符串，这里把文件读入和直接的字符串读入都归一处理了，增强后续代码的复用。
+
+* _stream_split_with_special：关键点。设置一个保留的buffer_size，他必须大于最长的special_token和单个单词的长度，用来防止token或单词被块状read给截断。调用正则匹配的时候，套用两层，一层处理special_tokens，一层处理words，都要注意保留足够的buffer长度来预防截断。
+
+```python
+     def _buffer_read(self, stream: str | io.FileIO, read_size:int = 8192)-> Any:
+        if isinstance(stream, str):
+            return stream[:read_size], stream[read_size:]
+        else:
+            string = stream.read(read_size)
+            return string, stream
+        
+    def _stream_split_with_special(self, stream:str, special_tokens: List[str] | None, buffer_size:int = 1024):
+        '''
+            change stream into word/special_token
+        '''
+        if special_tokens != None:
+            special_tokens.sort(key=len, reverse=True)
+        else:
+            special_tokens = []
+        
+        pattern_special = re.compile("|".join([re.escape(token) for token in special_tokens]))
+        pattern_word = re.compile(PAT)
+        
+        buffer = ""
+        
+        while True:
+            string, stream = self._buffer_read(stream)
+            buffer += string
+            if string == "":
+                buffer_size = 0 # 直接处理完最后一轮，不留buffer
+            
+            last = 0
+            if len(special_tokens) != 0:
+                for match in pattern_special.finditer(buffer):
+                    for word in pattern_word.findall(buffer[last: match.start()]):
+                        yield word
+                        
+                    if len(buffer) - match.start() < buffer_size: # 防止special_token来自于被截断的更长的special_token
+                        last = match.start()
+                        break
+                    
+                    yield match.group()
+                    last = match.end()
+                
+            buffer = buffer[last:]
+            
+            last = 0
+            for match in pattern_word.finditer(buffer):
+                
+                if len(buffer) - match.end() < buffer_size: # 防止token被截断
+                    last = match.start()
+                    break
+                
+                yield match.group()
+                
+            buffer = buffer[last:]
+            
+            if buffer_size == 0:
+                break
 ```
