@@ -3,14 +3,17 @@ from typing import Tuple, Dict, List, Any
 from sortedcontainers import SortedSet
 from functools import lru_cache
 
+
 from cs336_basics.profiler import profile
 from cs336_basics.pretokenization_example import find_chunk_boundaries
 
 from multiprocessing import Pool
 import numpy as np
 import numpy.typing as npt
+import ast
 import sys
 import io
+import os
 
 
 PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
@@ -73,7 +76,7 @@ class Tokenizer:
             string = stream.read(read_size)
             return string, stream
         
-    def _stream_split_with_special(self, stream:str, special_tokens: List[str] | None, buffer_size:int = 1024):
+    def _stream_split_with_special(self, stream:str, special_tokens: List[str] | None, buffer_size:int = 128):
         '''
             change stream into word/special_token
         '''
@@ -487,6 +490,23 @@ def main():
         f.write(str(merges))
         f.close()         
 
+@profile
+def encode(vocab_path:str, merges_path:str, input_path:str ):
+    tokenizer = Tokenizer()
+    with open(vocab_path, "r") as f:
+        vocab = ast.literal_eval(f.read())
+        f.close()
+    with open(merges_path, "r") as f:
+        merges = ast.literal_eval(f.read())
+        f.close()
+    
+    tokenizer.init_from_given_member(vocab, merges, special_tokens=["<|endoftext|>"])
+    
+    with open(input_path, "r") as f:
+        ans = np.array([token for token in tokenizer.encode_iterable(f)], dtype=np.uint16)
+        np.save(input_path+".npy", ans)
+        f.close()
+            
     
 if __name__ == "__main__":
     # from tests.test_train_bpe import test_train_bpe, test_train_bpe_speed, test_train_bpe_special_tokens
@@ -495,10 +515,13 @@ if __name__ == "__main__":
     # tokenizer = Tokenizer()
     # tokenizer.test_multi_process_pre_tokenize()
     
-    from tests.test_tokenizer import test_encode_memory_usage,test_encode_iterable_tinystories_sample_roundtrip,test_roundtrip_single_character
-    test_encode_memory_usage()
+    # from tests.test_tokenizer import test_encode_memory_usage,test_encode_iterable_tinystories_sample_roundtrip,test_roundtrip_single_character
+    # test_encode_memory_usage()
     # test_roundtrip_single_character()
     # test_encode_iterable_tinystories_sample_roundtrip()
     
     # main()
+    encode(vocab_path="data/OpenWebText_BPE/trained_vocab.txt", 
+           merges_path="data/OpenWebText_BPE/trained_merges.txt",
+           input_path="data/owt_train.txt")
     pass

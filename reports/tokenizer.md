@@ -187,3 +187,11 @@ tests/test_train_bpe.py::test_train_bpe_special_tokens PASSED
             if buffer_size == 0:
                 break
 ```
+
+## 吞吐测试
+
+* 在TinyStories_train 数据集上，10000的vocab_size，处理 2.1G 的数据，用时 3800 sec，吞吐约为 0.56 MB/sec
+
+* 在owt_valid 数据集上，32000的vocab_size，处理 277M 的数据，用时 1323.954 sec，吞吐约为 0.17 MB/sec （若按此预估，训练train数据集12G约需要20h）
+
+* 在owt_train 数据集上，32000的vocab_size，处理 12G 的数据，用时 53196.367 sec，吞吐约为 0.23 MB/sec 
