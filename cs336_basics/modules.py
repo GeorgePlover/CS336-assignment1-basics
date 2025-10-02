@@ -41,7 +41,28 @@ class Linear(nn.Module):
         
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return einsum(x, self.weight, "... in_size, out_size in_size -> ... out_size")
-    
+
+class Embedding(nn.Module):
+    def __init__(self, num_embeddings:int, embedding_dim:int, device=None, dtype=None):
+        '''
+        num_embeddings: int Size of the vocabulary
+        embedding_dim: int Dimension of the embedding vectors, i.e., d_model
+        device: torch.device | None = None Device to store the parameters on
+        dtype: torch.dtype | None = None Data type of the parameters
+        '''
+        factory_kwargs = {"device": device, "dtype": dtype}
+        super().__init__()
+        self.num_embeddings = num_embeddings
+        self.embedding_dim = embedding_dim
+        self.weight = nn.Parameter(
+            data=torch.empty(size=(num_embeddings, embedding_dim), **factory_kwargs), # 让embedding维度连续存放
+            requires_grad=True
+        )
+        Parameter_Init.embedding(self.weight)
+        
+    def forward(self, x: torch.Tensor)->torch.Tensor:
+        return self.weight[x] # 此处直接调用tensor的索引算子；注意到下标是 [0,num_embeddings-1]
+        
 
     
 
@@ -61,9 +82,20 @@ class Test_Modules:
         for key, value in L.state_dict().items():
             print(f"{key}: {value.shape}")
         print("end\n")
+    
+    @staticmethod
+    def test_embedding():
+        print("\nLinear sample:")
+        x = torch.tensor([[3,1,2],[3,2,1]])
+        print("x=", x)
+        E = Embedding(num_embeddings=4, embedding_dim=4)
+        print("linear weight=", E.weight)
+        y = E(x)
+        print("y=", y)
+        print("end\n")
         
         
 
 if __name__ == "__main__":
-    Test_Modules.test_linear()
+    Test_Modules.test_embedding()
         
