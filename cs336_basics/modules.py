@@ -175,6 +175,21 @@ class SafeSoftmax(nn.Module):
         res = safe_exp_x / sum_val
         return res
         
+class ScaledDotProductAttention(nn.Module):
+    def __init__(self):
+        super().__init__()
+        
+    def forward(self, Q: torch.Tensor, K: torch.Tensor, V: torch.Tensor, mask:torch.Tensor | None = None):
+        sqrt_d = torch.sqrt(torch.tensor(K.shape[-1], dtype=float, device=K.device))
+        softmax = SafeSoftmax()
+        QK = einsum(Q,K,"... seq_q d, ... seq_k d -> ... seq_q seq_k") / sqrt_d
+        if mask != None:
+            add = torch.where(mask, 0.0, -torch.inf)
+            QK = QK + add
+        soft_QK = softmax(QK)
+        res = einsum(soft_QK, V, "... seq_q seq_k, ... seq_k d_v -> ... seq_q d_v")
+        return res
+        
         
     
 
@@ -251,8 +266,22 @@ class Test_Modules:
         print("y=", y)
         print("end\n")
         
+    @staticmethod
+    def test_scaled_dot_product_attention():
+        print("\nScaled Dot Product Attention sample:")
+        Q = torch.tensor([[3.,1.,2.,4.],[3.,2.,1.,4.]])
+        K = torch.tensor([[3.,1.,2.,4.],[3.,2.,1.,4.]])
+        V = torch.tensor([[3.,1.,2.,4.],[3.,2.,1.,4.]])
+        print("Q=", Q)
+        print("K=", K)
+        print("V=", V)
+        attn = ScaledDotProductAttention()
+        y = attn(Q,K,V)
+        print("y=", y)
+        print("end\n")
+        
         
 
 if __name__ == "__main__":
-    Test_Modules.test_safe_softmax()
+    Test_Modules.test_scaled_dot_product_attention()
         
