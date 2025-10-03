@@ -163,7 +163,17 @@ class RoPE(nn.Module):
         res = einsum(trans, pair_wise_x, "... half_d_k r c, ... half_d_k c -> ... half_d_k r")
         res = rearrange(res, "... half_d_k r -> ... (half_d_k r)")
         return res
+    
+class SafeSoftmax(nn.Module):
+    def __init__(self):
+        super().__init__()
         
+    def forward(self, x: torch.Tensor):
+        max_val = reduce(x, "... d -> ... 1", "max")
+        safe_exp_x = torch.exp(x-max_val)
+        sum_val = reduce(safe_exp_x, "... d -> ... 1", "sum")
+        res = safe_exp_x / sum_val
+        return res
         
         
     
@@ -230,9 +240,19 @@ class Test_Modules:
         y = rope(x, torch.tensor([0,1]))
         print("y=", y)
         print("end\n")
+    
+    @staticmethod
+    def test_safe_softmax():
+        print("\nSafe-Softmax sample:")
+        x = torch.tensor([[3.,1.,2.,4.],[3.,2.,1.,4.]])
+        print("x=", x)
+        softmax = SafeSoftmax()
+        y = softmax(x)
+        print("y=", y)
+        print("end\n")
         
         
 
 if __name__ == "__main__":
-    Test_Modules.test_rope()
+    Test_Modules.test_safe_softmax()
         
