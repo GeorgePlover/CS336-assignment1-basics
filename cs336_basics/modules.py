@@ -1,5 +1,5 @@
 import torch 
-from einops import rearrange, einsum, reduce
+from einops import rearrange, einsum, reduce, repeat
 import torch.nn as nn
 
 class Parameter_Init:
@@ -151,13 +151,13 @@ class RoPE(nn.Module):
         combined = torch.stack([cos_m, -sin_m, sin_m, cos_m], dim = -1)
         trans = rearrange(combined, "... (h w) -> ... h w", h=2, w=2)
         
-        # 转为参数
-        self.trans = nn.Parameter(
-            data = trans,
-            requires_grad = False
-        )
+        # 转为buffer
+        self.register_buffer("trans", trans, persistent=False)
     
-    def forward(self, x: torch.Tensor, token_positions: torch.Tensor):
+    def forward(self, x: torch.Tensor, token_positions: torch.Tensor | None = None):
+        if token_positions == None:
+            s = x.shape[-2]
+            token_positions = torch.arange(s).expand(*x.shape[:-2], s)
         trans = self.trans[token_positions] # 索引出对应的旋转矩阵
         pair_wise_x = rearrange(x, "... (half_d_k two) -> ... half_d_k two", half_d_k = self.d_k//2, two = 2)
         res = einsum(trans, pair_wise_x, "... half_d_k r c, ... half_d_k c -> ... half_d_k r")
@@ -189,6 +189,65 @@ class ScaledDotProductAttention(nn.Module):
         soft_QK = softmax(QK)
         res = einsum(soft_QK, V, "... seq_q seq_k, ... seq_k d_v -> ... seq_q d_v")
         return res
+    
+class MultiHeadSelfAttention(nn.Module):
+    def __init__(self, d_input:int, num_heads:int, d_qk:int, d_v:int, d_output:int, 
+                 rope:RoPE|None = None, device=None, dtype=None):
+        '''
+        d_input: int Dimensionality of the Transformer block inputs.
+        num_heads: int Number of heads to use in multi-head self-attention.
+        d_qk: int Totol dimensionality of Q & K
+        d_v: int Total dimensionality of V
+        d_output: int Dimensionality of the Transformer block outputs.
+        rope: RoPE a given rope module
+        '''
+        factory_kwargs = {"device":device, "dtype":dtype}
+        super().__init__()
+        self.d_input = d_input
+        self.num_heads = num_heads
+        self.d_qk = d_qk
+        self.d_v = d_v
+        self.d_output = d_output
+        if rope != None:
+            self.rope = rope
+        else:
+            self.rope = None
+        self.attention = ScaledDotProductAttention()
+        
+        self.wq = Linear(in_features=d_input, out_features=d_qk, **factory_kwargs)
+        self.wk = Linear(in_features=d_input, out_features=d_qk, **factory_kwargs)
+        self.wv = Linear(in_features=d_input, out_features=d_v, **factory_kwargs)
+        self.wo = Linear(in_features=d_v, out_features=d_output, **factory_kwargs)
+        
+    def forward(self, x:torch.Tensor, token_positions:torch.Tensor|None = None):
+        '''
+        x: [... seq d_input]
+        '''
+        seq = x.shape[-2]
+        n_head_q = rearrange(self.wq(x), "... seq (num_head dh_qk) -> ... num_head seq dh_qk",
+                             num_head=self.num_heads, dh_qk = self.d_qk // self.num_heads)
+        n_head_k = rearrange(self.wk(x), "... seq (num_head dh_qk) -> ... num_head seq dh_qk",
+                             num_head=self.num_heads, dh_qk = self.d_qk // self.num_heads)
+        n_head_v = rearrange(self.wv(x), "... seq (num_head dh_v) -> ... num_head seq dh_v",
+                             num_head=self.num_heads, dh_v = self.d_v // self.num_heads)
+        if self.rope != None:
+            n_head_q_rope = self.rope(n_head_q, token_positions)
+            n_head_k_rope = self.rope(n_head_k, token_positions)
+        else:
+            n_head_q_rope = n_head_q
+            n_head_k_rope = n_head_k
+        
+        mask = torch.tril(torch.ones(size=(seq,seq))).bool()
+        n_head_atten_score = self.attention(n_head_q_rope,n_head_k_rope,n_head_v,mask)
+        
+        n_head_atten_score = rearrange(n_head_atten_score,
+                                       "... num_head seq dh_v -> ... seq (num_head dh_v)")
+        res = self.wo(n_head_atten_score)
+        
+        return res
+        
+        
+        
         
         
     
