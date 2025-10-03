@@ -12,6 +12,14 @@
             "request": "launch",
             "program": "cs336_basics/tokenizer.py",
             "console": "integratedTerminal"
+        },
+        {
+            "name": "test_modules",
+            "type": "debugpy",
+            "python": "${command:python.interpreterPath}",
+            "request": "launch",
+            "program": "cs336_basics/modules.py",
+            "console": "integratedTerminal"
         }
     ]
 }

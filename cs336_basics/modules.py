@@ -1,5 +1,5 @@
 import torch 
-from einops import rearrange, einsum
+from einops import rearrange, einsum, reduce
 import torch.nn as nn
 
 class Parameter_Init:
@@ -18,6 +18,10 @@ class Parameter_Init:
         sigma = sigma_square ** 0.5
         nn.init.trunc_normal_(tensor=weight, mean=0, std=sigma,
                               a=-3*sigma, b=3*sigma)
+        
+    @staticmethod
+    def rmsnorm(gates: nn.Parameter):
+        nn.init.constant_(tensor=gates, val=1.0)
         
 
 class Linear(nn.Module):
@@ -63,7 +67,37 @@ class Embedding(nn.Module):
     def forward(self, x: torch.Tensor)->torch.Tensor:
         return self.weight[x] # 此处直接调用tensor的索引算子；注意到下标是 [0,num_embeddings-1]
         
-
+class RMSNorm(nn.Module):
+    def __init__(self, d_model:int, eps:float = 1e-5, device = None, dtype = None):
+        '''
+        d_model: int Hidden dimension of the model
+        eps: float = 1e-5 Epsilon value for numerical stability
+        device: torch.device | None = None Device to store the parameters on
+        dtype: torch.dtype | None = None Data type of the parameters
+        '''
+        factory_kwargs = {"device":device, "dtype":dtype}
+        super().__init__()
+        self.d_model = d_model
+        self.eps = eps
+        self.gates = nn.Parameter(
+            data=torch.empty(size=(d_model,), **factory_kwargs),
+            requires_grad=True
+        )
+        Parameter_Init.rmsnorm(self.gates)
+        
+    def forward(self, x: torch.Tensor)->torch.Tensor:
+        # trans to float32
+        x_type = x.dtype
+        x = x.to(torch.float32)
+        
+        # calc
+        mean_square = reduce(x * x,"... d_model -> ... 1", 'mean') # 对应位置相乘求平均，保留维度，而不是压掉，以便后续 x/root 广播 
+        root = torch.sqrt(mean_square + self.eps)
+        res = einsum(x / root, self.gates, "... d_model, d_model -> ... d_model")
+        
+        # trans back
+        return res.to(x_type)
+        
     
 
 class Test_Modules:
@@ -85,17 +119,28 @@ class Test_Modules:
     
     @staticmethod
     def test_embedding():
-        print("\nLinear sample:")
+        print("\nEmbedding sample:")
         x = torch.tensor([[3,1,2],[3,2,1]])
         print("x=", x)
         E = Embedding(num_embeddings=4, embedding_dim=4)
-        print("linear weight=", E.weight)
+        print("weight=", E.weight)
         y = E(x)
+        print("y=", y)
+        print("end\n")
+        
+    @staticmethod
+    def test_rmsnorm():
+        print("\nRMSNorm sample:")
+        x = torch.tensor([[3.,1.,2.],[3.,2.,1.]])
+        print("x=", x)
+        rms = RMSNorm(d_model=x.shape[-1], eps=1e-5)
+        print("gates=", rms.gates)
+        y = rms(x)
         print("y=", y)
         print("end\n")
         
         
 
 if __name__ == "__main__":
-    Test_Modules.test_embedding()
+    Test_Modules.test_rmsnorm()
         
