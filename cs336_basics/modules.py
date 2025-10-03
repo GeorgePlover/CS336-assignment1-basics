@@ -126,6 +126,46 @@ class SwiGLU(nn.Module):
         
         return res
         
+class RoPE(nn.Module):
+    def __init__(self, theta:float, d_k:int, max_seq_len:int, device = None):
+        '''
+        theta: float Θ value for the RoPE
+        d_k: int dimension of query and key vectors
+        max_seq_len: int Maximum sequence length that will be inputted
+        device: torch.device | None = None Device to store the buffer on
+        '''
+        factory_kwargs = {"device":device}
+        super().__init__()
+        self.theta = theta
+        self.d_k = d_k
+        self.max_seq_len = max_seq_len
+        
+        # 构建角度矩阵
+        pos_id = torch.tensor(list(range(max_seq_len)), **factory_kwargs)
+        d_id = torch.tensor([theta ** (-2*k/d_k) for k in range(d_k//2)], **factory_kwargs)
+        mat = einsum(pos_id, d_id, "max_seq_len, half_d_k -> max_seq_len half_d_k")
+        
+        # 构建旋转矩阵
+        cos_m = torch.cos(mat)
+        sin_m = torch.sin(mat)
+        combined = torch.stack([cos_m, -sin_m, sin_m, cos_m], dim = -1)
+        trans = rearrange(combined, "... (h w) -> ... h w", h=2, w=2)
+        
+        # 转为参数
+        self.trans = nn.Parameter(
+            data = trans,
+            requires_grad = False
+        )
+    
+    def forward(self, x: torch.Tensor, token_positions: torch.Tensor):
+        trans = self.trans[token_positions] # 索引出对应的旋转矩阵
+        pair_wise_x = rearrange(x, "... (half_d_k two) -> ... half_d_k two", half_d_k = self.d_k//2, two = 2)
+        res = einsum(trans, pair_wise_x, "... half_d_k r c, ... half_d_k c -> ... half_d_k r")
+        res = rearrange(res, "... half_d_k r -> ... (half_d_k r)")
+        return res
+        
+        
+        
     
 
 class Test_Modules:
@@ -180,8 +220,19 @@ class Test_Modules:
         print("y=", y)
         print("end\n")
         
+    @staticmethod
+    def test_rope():
+        print("\nRoPE sample:")
+        x = torch.tensor([[3.,1.,2.,4.],[3.,2.,1.,4.]])
+        print("x=", x)
+        rope = RoPE(theta=torch.pi/10, d_k=4, max_seq_len=2)
+        print("trans=", rope.trans)
+        y = rope(x, torch.tensor([0,1]))
+        print("y=", y)
+        print("end\n")
+        
         
 
 if __name__ == "__main__":
-    Test_Modules.test_swiglu()
+    Test_Modules.test_rope()
         
