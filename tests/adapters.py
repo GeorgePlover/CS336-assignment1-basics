@@ -10,7 +10,7 @@ from jaxtyping import Bool, Float, Int
 from torch import Tensor
 
 from cs336_basics.tokenizer import Tokenizer
-from cs336_basics.modules import Linear, Embedding, RMSNorm, SwiGLU, RoPE, SafeSoftmax, ScaledDotProductAttention, MultiHeadSelfAttention
+from cs336_basics.modules import Linear, Embedding, RMSNorm, SwiGLU, RoPE, SafeSoftmax, ScaledDotProductAttention, MultiHeadSelfAttention, TransformerBlock
 
 def run_linear(
     d_in: int,
@@ -313,7 +313,26 @@ def run_transformer_block(
         Float[Tensor, "batch sequence_length d_model"] Tensor with the output of
         running the Transformer block on the input features while using RoPE.
     """
-    raise NotImplementedError
+    transformer_block = TransformerBlock(
+        d_model=d_model,
+        num_heads=num_heads,
+        d_ff=d_ff,
+        rope=RoPE(theta=theta, d_k=d_model//num_heads, max_seq_len=max_seq_len)
+    )
+    transformer_block.load_state_dict(
+        {
+            "attention.wq.weight": weights["attn.q_proj.weight"],
+            "attention.wk.weight": weights["attn.k_proj.weight"],
+            "attention.wv.weight": weights["attn.v_proj.weight"],
+            "attention.wo.weight": weights["attn.output_proj.weight"],
+            "pre_attn_rmsnorm.gates": weights["ln1.weight"],
+            "ffn.w1.weight": weights["ffn.w1.weight"],
+            "ffn.w2.weight": weights["ffn.w2.weight"],
+            "ffn.w3.weight": weights["ffn.w3.weight"],
+            "pre_ffn_rmsnorm.gates": weights["ln2.weight"],
+        }
+    )
+    return transformer_block(in_features)
 
 
 def run_transformer_lm(

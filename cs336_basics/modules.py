@@ -246,6 +246,36 @@ class MultiHeadSelfAttention(nn.Module):
         
         return res
         
+class TransformerBlock(nn.Module):
+    def __init__(self, d_model:int, num_heads:int, d_ff:int,
+                 rope:RoPE|None = None, device=None, dtype=None):
+        '''
+        d_model: int Dimensionality of the Transformer block inputs.
+        num_heads: int Number of heads to use in multi-head self-attention.
+        d_ff: int Dimensionality of the position-wise feed-forward inner layer.
+        '''
+        factory_kwargs = {"device":device, "dtype":dtype}
+        super().__init__()
+        self.d_model = d_model
+        self.num_heads = num_heads
+        self.d_ff = d_ff
+        
+        self.pre_attn_rmsnorm = RMSNorm(d_model=d_model, eps = 1e-5, **factory_kwargs)
+        self.attention = MultiHeadSelfAttention(d_input=d_model,
+                                                num_heads=num_heads,
+                                                d_qk=d_model,
+                                                d_v=d_model,
+                                                d_output=d_model,
+                                                rope=rope,
+                                                **factory_kwargs)
+        self.pre_ffn_rmsnorm = RMSNorm(d_model=d_model, eps = 1e-5, **factory_kwargs)
+        self.ffn = SwiGLU(d_model=d_model, d_ff=d_ff,**factory_kwargs)
+    
+    def forward(self, x: torch.Tensor):
+        x = x + self.attention(self.pre_attn_rmsnorm(x))
+        x = x + self.ffn(self.pre_ffn_rmsnorm(x))
+        return x
+        
         
         
         
