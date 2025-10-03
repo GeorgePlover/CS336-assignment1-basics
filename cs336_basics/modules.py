@@ -276,6 +276,46 @@ class TransformerBlock(nn.Module):
         x = x + self.ffn(self.pre_ffn_rmsnorm(x))
         return x
         
+class TransformerLM(nn.Module):
+    def __init__(self, vocab_size:int, context_length:int, num_layers:int,
+                 d_model:int, num_heads:int, d_ff:int,
+                 rope:RoPE|None = None, device=None, dtype=None):
+        '''
+        vocab_size: int The size of the vocabulary, necessary for determining the dimensionality of the token
+                    embedding matrix.
+        context_length: int The maximum context length, necessary for determining the dimensionality of
+                        the position embedding matrix.
+        num_layers: int The number of Transformer blocks to use.
+        '''
+        factory_kwargs = {"device":device, "dtype":dtype}
+        super().__init__()
+        self.vocab_size = vocab_size
+        self.context_length = context_length
+        self.num_layers = num_layers
+        self.d_model = d_model
+        self.num_heads = num_heads
+        self.d_ff = d_ff
+        self.rope = rope
+        
+        self.token_embeddings = Embedding(num_embeddings=vocab_size, embedding_dim=d_model,**factory_kwargs)
+        self.layers = nn.ModuleList([TransformerBlock(d_model=d_model,
+                                         num_heads=num_heads,
+                                         d_ff=d_ff,
+                                         rope=rope,
+                                         **factory_kwargs) for l in range(num_layers)])
+        self.final_rmsnorm = RMSNorm(d_model=d_model,eps=1e-5,**factory_kwargs)
+        self.lm_head = Linear(in_features=d_model, out_features=vocab_size, **factory_kwargs)
+    
+    def forward(self, x:torch.Tensor):
+        out = self.token_embeddings(x)
+        for layer in self.layers:
+            out = layer(out)
+        out = self.final_rmsnorm(out)
+        out = self.lm_head(out)
+        return out
+        
+            
+        
         
         
         

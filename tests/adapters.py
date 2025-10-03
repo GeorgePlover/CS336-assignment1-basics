@@ -10,8 +10,8 @@ from jaxtyping import Bool, Float, Int
 from torch import Tensor
 
 from cs336_basics.tokenizer import Tokenizer
-from cs336_basics.modules import Linear, Embedding, RMSNorm, SwiGLU, RoPE, SafeSoftmax, ScaledDotProductAttention, MultiHeadSelfAttention, TransformerBlock
-
+from cs336_basics.modules import Linear, Embedding, RMSNorm, SwiGLU, RoPE, SafeSoftmax
+from cs336_basics.modules import ScaledDotProductAttention, MultiHeadSelfAttention, TransformerBlock, TransformerLM
 def run_linear(
     d_in: int,
     d_out: int,
@@ -414,7 +414,27 @@ def run_transformer_lm(
         Float[Tensor, "batch_size sequence_length vocab_size"]: Tensor with the predicted unnormalized
         next-word distribution for each token.
     """
-    raise NotImplementedError
+    lm = TransformerLM(vocab_size=vocab_size, context_length=context_length, num_layers=num_layers,
+                       d_model=d_model, num_heads=num_heads, d_ff=d_ff,
+                       rope=RoPE(theta=rope_theta, d_k= d_model//num_heads, max_seq_len=context_length))
+    state_dict = {
+        "token_embeddings.weight": weights["token_embeddings.weight"],
+        "final_rmsnorm.gates": weights["ln_final.weight"],
+        "lm_head.weight": weights["lm_head.weight"],
+    }
+    for l in range(num_layers):
+        state_dict[f"layers.{l}.attention.wq.weight"] = weights[f"layers.{l}.attn.q_proj.weight"]
+        state_dict[f"layers.{l}.attention.wk.weight"] = weights[f"layers.{l}.attn.k_proj.weight"]
+        state_dict[f"layers.{l}.attention.wv.weight"] = weights[f"layers.{l}.attn.v_proj.weight"]
+        state_dict[f"layers.{l}.attention.wo.weight"] = weights[f"layers.{l}.attn.output_proj.weight"]
+        state_dict[f"layers.{l}.pre_attn_rmsnorm.gates"] = weights[f"layers.{l}.ln1.weight"]
+        state_dict[f"layers.{l}.ffn.w1.weight"] = weights[f"layers.{l}.ffn.w1.weight"]
+        state_dict[f"layers.{l}.ffn.w2.weight"] = weights[f"layers.{l}.ffn.w2.weight"]
+        state_dict[f"layers.{l}.ffn.w3.weight"] = weights[f"layers.{l}.ffn.w3.weight"]
+        state_dict[f"layers.{l}.pre_ffn_rmsnorm.gates"] = weights[f"layers.{l}.ln2.weight"]
+    
+    lm.load_state_dict(state_dict)
+    return lm(in_indices)
 
 
 def run_rmsnorm(
