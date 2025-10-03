@@ -97,6 +97,34 @@ class RMSNorm(nn.Module):
         
         # trans back
         return res.to(x_type)
+    
+class SwiGLU(nn.Module):
+    def __init__(self, d_model:int, d_ff:int, device=None, dtype=None):
+        '''
+        d_model:int embedding size
+        d_ff:int intermediate size, is better to be 8/3 d_model
+        device: torch.device | None = None Device to store the parameters on
+        dtype: torch.dtype | None = None Data type of the parameters
+        
+        SwiGLU(x) = W2 @ ( (W1@x) o-mul sigmoid(W1@x)  o-mul W3@x))
+        W1,W3: [d_ff, d_model]
+        W2: [d_model, d_ff]
+        '''
+        factory_kwargs = {"device":device, "dtype":dtype}
+        super().__init__()
+        self.d_model = d_model
+        self.d_ff= d_ff
+        self.w1 = Linear(d_model, d_ff, **factory_kwargs)
+        self.w2 = Linear(d_ff, d_model, **factory_kwargs)
+        self.w3 = Linear(d_model, d_ff, **factory_kwargs)
+    
+    def forward(self, x: torch.Tensor):
+        w1x = self.w1(x)
+        w3x = self.w3(x)
+        silu = w1x * torch.sigmoid(w1x)
+        res = self.w2(silu * w3x)
+        
+        return res
         
     
 
@@ -139,8 +167,21 @@ class Test_Modules:
         print("y=", y)
         print("end\n")
         
+    @staticmethod
+    def test_swiglu():
+        print("\nSwiGLU sample:")
+        x = torch.tensor([[3.,1.,2.],[3.,2.,1.]])
+        print("x=", x)
+        swiglu = SwiGLU(d_model=x.shape[-1], d_ff = 8 * x.shape[-1] // 3)
+        print("w1=", swiglu.w1.weight)
+        print("w2=", swiglu.w2.weight)
+        print("w3=", swiglu.w3.weight)
+        y = swiglu(x)
+        print("y=", y)
+        print("end\n")
+        
         
 
 if __name__ == "__main__":
-    Test_Modules.test_rmsnorm()
+    Test_Modules.test_swiglu()
         
