@@ -1,6 +1,7 @@
 import torch 
 from einops import rearrange, einsum, reduce, repeat
-import torch.nn as nn
+from torch import nn, Tensor
+
 
 class Parameter_Init:
     def __init__(self):
@@ -43,7 +44,7 @@ class Linear(nn.Module):
         Parameter_Init.linear_weights(self.weight, in_features, out_features)
         
         
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: Tensor) -> Tensor:
         return einsum(x, self.weight, "... in_size, out_size in_size -> ... out_size")
 
 class Embedding(nn.Module):
@@ -64,7 +65,7 @@ class Embedding(nn.Module):
         )
         Parameter_Init.embedding(self.weight)
         
-    def forward(self, x: torch.Tensor)->torch.Tensor:
+    def forward(self, x: Tensor)->Tensor:
         return self.weight[x] # 此处直接调用tensor的索引算子；注意到下标是 [0,num_embeddings-1]
         
 class RMSNorm(nn.Module):
@@ -85,7 +86,7 @@ class RMSNorm(nn.Module):
         )
         Parameter_Init.rmsnorm(self.gates)
         
-    def forward(self, x: torch.Tensor)->torch.Tensor:
+    def forward(self, x: Tensor)->Tensor:
         # trans to float32
         x_type = x.dtype
         x = x.to(torch.float32)
@@ -118,7 +119,7 @@ class SwiGLU(nn.Module):
         self.w2 = Linear(d_ff, d_model, **factory_kwargs)
         self.w3 = Linear(d_model, d_ff, **factory_kwargs)
     
-    def forward(self, x: torch.Tensor):
+    def forward(self, x: Tensor):
         w1x = self.w1(x)
         w3x = self.w3(x)
         silu = w1x * torch.sigmoid(w1x)
@@ -141,8 +142,8 @@ class RoPE(nn.Module):
         self.max_seq_len = max_seq_len
         
         # 构建角度矩阵
-        pos_id = torch.tensor(list(range(max_seq_len)), **factory_kwargs)
-        d_id = torch.tensor([theta ** (-2*k/d_k) for k in range(d_k//2)], **factory_kwargs)
+        pos_id = Tensor(list(range(max_seq_len)), **factory_kwargs)
+        d_id = Tensor([theta ** (-2*k/d_k) for k in range(d_k//2)], **factory_kwargs)
         mat = einsum(pos_id, d_id, "max_seq_len, half_d_k -> max_seq_len half_d_k")
         
         # 构建旋转矩阵
@@ -154,7 +155,7 @@ class RoPE(nn.Module):
         # 转为buffer
         self.register_buffer("trans", trans, persistent=False)
     
-    def forward(self, x: torch.Tensor, token_positions: torch.Tensor | None = None):
+    def forward(self, x: Tensor, token_positions: Tensor | None = None):
         if token_positions == None:
             s = x.shape[-2]
             token_positions = torch.arange(s).expand(*x.shape[:-2], s)
@@ -168,7 +169,7 @@ class SafeSoftmax(nn.Module):
     def __init__(self):
         super().__init__()
         
-    def forward(self, x: torch.Tensor):
+    def forward(self, x: Tensor):
         max_val = reduce(x, "... d -> ... 1", "max")
         safe_exp_x = torch.exp(x-max_val)
         sum_val = reduce(safe_exp_x, "... d -> ... 1", "sum")
@@ -179,8 +180,8 @@ class ScaledDotProductAttention(nn.Module):
     def __init__(self):
         super().__init__()
         
-    def forward(self, Q: torch.Tensor, K: torch.Tensor, V: torch.Tensor, mask:torch.Tensor | None = None):
-        sqrt_d = torch.sqrt(torch.tensor(K.shape[-1], dtype=float, device=K.device))
+    def forward(self, Q: Tensor, K: Tensor, V: Tensor, mask:Tensor | None = None):
+        sqrt_d = torch.sqrt(Tensor(K.shape[-1], dtype=float, device=K.device))
         softmax = SafeSoftmax()
         QK = einsum(Q,K,"... seq_q d, ... seq_k d -> ... seq_q seq_k") / sqrt_d
         if mask != None:
@@ -219,7 +220,7 @@ class MultiHeadSelfAttention(nn.Module):
         self.wv = Linear(in_features=d_input, out_features=d_v, **factory_kwargs)
         self.wo = Linear(in_features=d_v, out_features=d_output, **factory_kwargs)
         
-    def forward(self, x:torch.Tensor, token_positions:torch.Tensor|None = None):
+    def forward(self, x:Tensor, token_positions:Tensor|None = None):
         '''
         x: [... seq d_input]
         '''
@@ -271,7 +272,7 @@ class TransformerBlock(nn.Module):
         self.pre_ffn_rmsnorm = RMSNorm(d_model=d_model, eps = 1e-5, **factory_kwargs)
         self.ffn = SwiGLU(d_model=d_model, d_ff=d_ff,**factory_kwargs)
     
-    def forward(self, x: torch.Tensor):
+    def forward(self, x: Tensor):
         x = x + self.attention(self.pre_attn_rmsnorm(x))
         x = x + self.ffn(self.pre_ffn_rmsnorm(x))
         return x
@@ -306,7 +307,7 @@ class TransformerLM(nn.Module):
         self.final_rmsnorm = RMSNorm(d_model=d_model,eps=1e-5,**factory_kwargs)
         self.lm_head = Linear(in_features=d_model, out_features=vocab_size, **factory_kwargs)
     
-    def forward(self, x:torch.Tensor):
+    def forward(self, x:Tensor):
         out = self.token_embeddings(x)
         for layer in self.layers:
             out = layer(out)
@@ -342,7 +343,7 @@ class Test_Modules:
     @staticmethod
     def test_embedding():
         print("\nEmbedding sample:")
-        x = torch.tensor([[3,1,2],[3,2,1]])
+        x = Tensor([[3,1,2],[3,2,1]])
         print("x=", x)
         E = Embedding(num_embeddings=4, embedding_dim=4)
         print("weight=", E.weight)
@@ -353,7 +354,7 @@ class Test_Modules:
     @staticmethod
     def test_rmsnorm():
         print("\nRMSNorm sample:")
-        x = torch.tensor([[3.,1.,2.],[3.,2.,1.]])
+        x = Tensor([[3.,1.,2.],[3.,2.,1.]])
         print("x=", x)
         rms = RMSNorm(d_model=x.shape[-1], eps=1e-5)
         print("gates=", rms.gates)
@@ -364,7 +365,7 @@ class Test_Modules:
     @staticmethod
     def test_swiglu():
         print("\nSwiGLU sample:")
-        x = torch.tensor([[3.,1.,2.],[3.,2.,1.]])
+        x = Tensor([[3.,1.,2.],[3.,2.,1.]])
         print("x=", x)
         swiglu = SwiGLU(d_model=x.shape[-1], d_ff = 8 * x.shape[-1] // 3)
         print("w1=", swiglu.w1.weight)
@@ -377,18 +378,18 @@ class Test_Modules:
     @staticmethod
     def test_rope():
         print("\nRoPE sample:")
-        x = torch.tensor([[3.,1.,2.,4.],[3.,2.,1.,4.]])
+        x = Tensor([[3.,1.,2.,4.],[3.,2.,1.,4.]])
         print("x=", x)
         rope = RoPE(theta=torch.pi/10, d_k=4, max_seq_len=2)
         print("trans=", rope.trans)
-        y = rope(x, torch.tensor([0,1]))
+        y = rope(x, Tensor([0,1]))
         print("y=", y)
         print("end\n")
     
     @staticmethod
     def test_safe_softmax():
         print("\nSafe-Softmax sample:")
-        x = torch.tensor([[3.,1.,2.,4.],[3.,2.,1.,4.]])
+        x = Tensor([[3.,1.,2.,4.],[3.,2.,1.,4.]])
         print("x=", x)
         softmax = SafeSoftmax()
         y = softmax(x)
@@ -398,9 +399,9 @@ class Test_Modules:
     @staticmethod
     def test_scaled_dot_product_attention():
         print("\nScaled Dot Product Attention sample:")
-        Q = torch.tensor([[3.,1.,2.,4.],[3.,2.,1.,4.]])
-        K = torch.tensor([[3.,1.,2.,4.],[3.,2.,1.,4.]])
-        V = torch.tensor([[3.,1.,2.,4.],[3.,2.,1.,4.]])
+        Q = Tensor([[3.,1.,2.,4.],[3.,2.,1.,4.]])
+        K = Tensor([[3.,1.,2.,4.],[3.,2.,1.,4.]])
+        V = Tensor([[3.,1.,2.,4.],[3.,2.,1.,4.]])
         print("Q=", Q)
         print("K=", K)
         print("V=", V)
